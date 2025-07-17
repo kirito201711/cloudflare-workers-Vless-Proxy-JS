@@ -1,5 +1,5 @@
 import { connect } from "cloudflare:sockets";
-let userID = "86c50e3a-5b87-49dd-bd20-03c7f2735e40";
+let userID = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 function parseUUID(uuidString) {
   const hex = uuidString.replaceAll('-', '');
   const bytes = new Uint8Array(16);
