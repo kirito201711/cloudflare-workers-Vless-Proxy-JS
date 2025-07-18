@@ -1,6 +1,6 @@
-###  mihomo配置
+### mihomo配置
 
-
+```yaml
 name: "🇺🇸美国-CFWorkers"
 type: vless
 server: 141.101.122.83       # 需替换为实际优选IP
