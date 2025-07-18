@@ -32,6 +32,76 @@ const udpDnsCache = new LRUCache(500);
 const DNS_CACHE_TTL = 5 * 60 * 1000;
 const UDP_DNS_CACHE_TTL = 60 * 1000;
 
+// --- 新增部分开始 ---
+
+// Cloudflare IP 范围列表
+const CLOUDFLARE_IP_RANGES = [
+  '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '104.16.0.0/13',
+  '104.24.0.0/14', '108.162.192.0/18', '131.0.72.0/22', '141.101.64.0/18',
+  '162.158.0.0/15', '172.64.0.0/13', '173.245.48.0/20', '188.114.96.0/20',
+  '190.93.240.0/20', '197.234.240.0/22', '198.41.128.0/17', '2400:cb00::/32',
+  '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32',
+  '2a06:98c0::/29', '2c0f:f248::/32'
+];
+
+// 将IPv4地址转换为32位整数
+function ipv4ToNumber(ip) {
+  return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet, 10), 0) >>> 0;
+}
+
+// 将IPv6地址转换为128位BigInt
+function ipv6ToBigInt(ip) {
+  const parts = ip.split('::');
+  let left = [], right = [];
+  if (parts.length > 1) {
+    left = parts[0].split(':').filter(p => p);
+    right = parts[1].split(':').filter(p => p);
+  } else {
+    left = ip.split(':');
+  }
+  const fill = Array(8 - left.length - right.length).fill('0');
+  const fullParts = [...left, ...fill, ...right];
+  let bigInt = 0n;
+  for (const part of fullParts) {
+    bigInt = (bigInt << 16n) + BigInt(`0x${part || '0'}`);
+  }
+  return bigInt;
+}
+
+/**
+ * 检查IP地址是否在指定的CIDR范围内
+ * @param {string} ip - 要检查的IP地址 (IPv4 or IPv6)
+ * @returns {boolean} - 如果IP在列表中，则返回true，否则返回false
+ */
+function isIpInCidrList(ip) {
+  const isIPv6 = ip.includes(':');
+  for (const cidr of CLOUDFLARE_IP_RANGES) {
+    try {
+      const [range, prefixStr] = cidr.split('/');
+      const prefix = parseInt(prefixStr, 10);
+
+      if (isIPv6) {
+        if (!range.includes(':')) continue; // IPv6 IP跳过IPv4 CIDR
+        const ipBigInt = ipv6ToBigInt(ip);
+        const rangeBigInt = ipv6ToBigInt(range);
+        const mask = ((1n << BigInt(prefix)) - 1n) << BigInt(128 - prefix);
+        if ((ipBigInt & mask) === (rangeBigInt & mask)) return true;
+      } else {
+        if (range.includes(':')) continue; // IPv4 IP跳过IPv6 CIDR
+        const ipNum = ipv4ToNumber(ip);
+        const rangeNum = ipv4ToNumber(range);
+        const mask = -1 << (32 - prefix);
+        if ((ipNum & mask) === (rangeNum & mask)) return true;
+      }
+    } catch (e) {
+      // 忽略解析错误
+    }
+  }
+  return false;
+}
+
+// --- 新增部分结束 ---
+
 function concatArrayBuffers(...buffers) {
   const totalLength = buffers.reduce((sum, buffer) => sum + buffer.byteLength, 0);
   const result = new Uint8Array(totalLength);
@@ -54,12 +124,10 @@ export default {
     try {
       const upgradeHeader = request.headers.get("Upgrade");
       if (!upgradeHeader || upgradeHeader !== "websocket") {
-      
         return new Response("Hello World!", {
           status: 200,
           headers: { "Content-Type": "text/plain;charset=utf-8" },
         });
-        // --- 修改部分结束 ---
       }
       return await handleVlessWebSocket(request, env, ctx);
     } catch (err) {
@@ -67,8 +135,6 @@ export default {
     }
   },
 };
-
-// function handleHttpRequest(request) { ... } // <-- 整个函数已删除
 
 async function handleVlessWebSocket(request, env, ctx) {
   const wsPair = new WebSocketPair();
@@ -103,7 +169,7 @@ async function processWebSocketConnection(serverWS, earlyDataHeader) {
         return;
       }
 
-      const result = parseVlessHeader(chunk); // 调用已修改的、无校验的函数
+      const result = parseVlessHeader(chunk);
       if (result.hasError) throw new Error(result.message);
 
       const vlessRespHeader = new Uint8Array([result.vlessVersion[0], 0]);
@@ -126,6 +192,24 @@ async function processWebSocketConnection(serverWS, earlyDataHeader) {
         return tcpSocket;
       }
 
+      // --- 修改部分开始 ---
+      // 检查是否为指定列表中的IPv4地址
+      const isDesignatedIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(result.addressRemote) && isIpInCidrList(result.addressRemote);
+
+      if (isDesignatedIPv4) {
+        // 如果是，则直接使用NAT64连接，不再尝试直接连接
+        try {
+          const proxyIP = convertToNAT64IPv6(result.addressRemote);
+          const tcpSocket = await connectAndWrite(proxyIP, result.portRemote, rawClientData);
+          pipeRemoteToWebSocket(tcpSocket, serverWS, vlessRespHeader, null); // 成功后不再需要重试
+        } catch (err) {
+          serverWS.close(1011, `NAT64 connection to designated IP failed: ${err.message}`);
+        }
+        return; // 处理完毕，退出
+      }
+      // --- 修改部分结束 ---
+
+      // 对于其他所有地址（域名、非指定IP、指定IPv6），使用原始逻辑
       async function retry() {
         try {
           const proxyIP = await getIPv6ProxyAddress(result.addressRemote);
@@ -137,9 +221,11 @@ async function processWebSocketConnection(serverWS, earlyDataHeader) {
       }
 
       try {
+        // 首次尝试直接连接
         const tcpSocket = await connectAndWrite(result.addressRemote, result.portRemote, rawClientData);
         pipeRemoteToWebSocket(tcpSocket, serverWS, vlessRespHeader, retry);
       } catch (err) {
+        // 如果直接连接失败，则尝试通过NAT64重试
         await retry();
       }
     },
@@ -178,13 +264,11 @@ function createWebSocketReadableStream(ws, earlyDataHeader) {
   });
 }
 
-
 function parseVlessHeader(buffer) {
   if (buffer.byteLength < 24) return { hasError: true, message: '无效的头部长度' };
   
   const view = new DataView(buffer);
   const version = new Uint8Array(buffer.slice(0, 1));
-
 
   const optLength = view.getUint8(17);
   const command = view.getUint8(18 + optLength);
