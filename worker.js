@@ -1,38 +1,12 @@
 import { connect } from "cloudflare:sockets";
-let userID = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-function parseUUID(uuidString) {
-  const hex = uuidString.replaceAll('-', '');
-  const bytes = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) {
-    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
-}
-const userIDBytes = parseUUID(userID);
-function timingSafeCompare(a, b) {
-  if (a.byteLength !== b.byteLength) {
-    return false;
-  }
-  const viewA = new DataView(a.buffer, a.byteOffset, a.byteLength);
-  const viewB = new DataView(b.buffer, b.byteOffset, b.byteLength);
-  if (viewA.getBigUint64(0) !== viewB.getBigUint64(0)) {
-    return false;
-  }
-  if (viewA.getBigUint64(8) !== viewB.getBigUint64(8)) {
-    return false;
-  }
-  return true;
-}
 
 const WS_READY_STATE_OPEN = 1;
-const cn_hostnames = [''];
 
 class LRUCache {
   constructor(maxSize) {
     this.maxSize = maxSize;
     this.cache = new Map();
   }
-
   get(key) {
     const item = this.cache.get(key);
     if (item && item.expires > Date.now()) {
@@ -52,13 +26,12 @@ class LRUCache {
     this.cache.set(key, { data, expires: Date.now() + ttl });
   }
 }
-// 使用 LRU 缓存
+
 const nat64DnsCache = new LRUCache(1000);
 const udpDnsCache = new LRUCache(500);
-const DNS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-const UDP_DNS_CACHE_TTL = 60 * 1000; // 1 minute
+const DNS_CACHE_TTL = 5 * 60 * 1000;
+const UDP_DNS_CACHE_TTL = 60 * 1000;
 
-// 优化字节操作
 function concatArrayBuffers(...buffers) {
   const totalLength = buffers.reduce((sum, buffer) => sum + buffer.byteLength, 0);
   const result = new Uint8Array(totalLength);
@@ -70,7 +43,6 @@ function concatArrayBuffers(...buffers) {
   return result.buffer;
 }
 
-// 预分配常用的响应头
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
@@ -80,10 +52,14 @@ const CORS_HEADERS = {
 export default {
   async fetch(request, env, ctx) {
     try {
-    
       const upgradeHeader = request.headers.get("Upgrade");
       if (!upgradeHeader || upgradeHeader !== "websocket") {
-        return handleHttpRequest(request);
+      
+        return new Response("Hello World!", {
+          status: 200,
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+        });
+        // --- 修改部分结束 ---
       }
       return await handleVlessWebSocket(request, env, ctx);
     } catch (err) {
@@ -92,36 +68,7 @@ export default {
   },
 };
 
-function handleHttpRequest(request) {
-  const url = new URL(request.url);
-  if (cn_hostnames.includes('')) {
-    return new Response(JSON.stringify(request.cf, null, 4), {
-      status: 200,
-      headers: { "Content-Type": "application/json;charset=utf-8", ...CORS_HEADERS },
-    });
-  }
-  
-  const randomHostname = cn_hostnames[Math.floor(Math.random() * cn_hostnames.length)];
-  const newHeaders = new Headers(request.headers);
-  newHeaders.set("cf-connecting-ip", "1.2.3.4");
-  newHeaders.set("x-forwarded-for", "1.2.3.4");
-  newHeaders.set("x-real-ip", "1.2.3.4");
-  newHeaders.set("referer", "https://www.google.com/search?q=edtunnel");
-  
-  const proxyUrl = `https://${randomHostname}${url.pathname}${url.search}`;
-  
-  return fetch(new Request(proxyUrl, {
-    method: request.method,
-    headers: newHeaders,
-    body: request.body,
-    redirect: "manual",
-  })).then(response => {
-    if ([301, 302].includes(response.status)) {
-      return new Response(`Redirects to ${randomHostname} are not allowed.`, { status: 403, statusText: "Forbidden", headers: CORS_HEADERS });
-    }
-    return response;
-  });
-}
+// function handleHttpRequest(request) { ... } // <-- 整个函数已删除
 
 async function handleVlessWebSocket(request, env, ctx) {
   const wsPair = new WebSocketPair();
@@ -156,8 +103,7 @@ async function processWebSocketConnection(serverWS, earlyDataHeader) {
         return;
       }
 
-      // 优化点 2: 调用 parseVlessHeader 时传入预计算的 userIDBytes
-      const result = parseVlessHeader(chunk, userIDBytes);
+      const result = parseVlessHeader(chunk); // 调用已修改的、无校验的函数
       if (result.hasError) throw new Error(result.message);
 
       const vlessRespHeader = new Uint8Array([result.vlessVersion[0], 0]);
@@ -223,8 +169,7 @@ function createWebSocketReadableStream(ws, earlyDataHeader) {
           const data = new Uint8Array(decoded.length);
           for (let i = 0; i < decoded.length; i++) data[i] = decoded.charCodeAt(i);
           controller.enqueue(data.buffer);
-        } catch (e) {
-        }
+        } catch (e) {}
       }
     },
     cancel() {
@@ -233,20 +178,13 @@ function createWebSocketReadableStream(ws, earlyDataHeader) {
   });
 }
 
-// 优化点 3: 修改 parseVlessHeader 以接受字节数组并进行二进制比较
-function parseVlessHeader(buffer, userIDBytes) {
+
+function parseVlessHeader(buffer) {
   if (buffer.byteLength < 24) return { hasError: true, message: '无效的头部长度' };
   
   const view = new DataView(buffer);
   const version = new Uint8Array(buffer.slice(0, 1));
-  
-  // 直接从 buffer 中获取 16 字节的 UUID
-  const receivedUUIDBytes = new Uint8Array(buffer.slice(1, 17));
 
-  // 使用高效、安全的二进制比较
-  if (!timingSafeCompare(receivedUUIDBytes, userIDBytes)) {
-    return { hasError: true, message: '无效的用户' };
-  }
 
   const optLength = view.getUint8(17);
   const command = view.getUint8(18 + optLength);
@@ -311,8 +249,6 @@ function closeSocket(socket) {
     } catch (e) {}
   }
 }
-
-// 优化点 4: formatUUIDFast 函数已不再需要，可以安全删除。
 
 function convertToNAT64IPv6(ipv4Address) {
   const parts = ipv4Address.split('.');
