@@ -57,8 +57,7 @@ return `[2a00:1098:2b::${hex[0]}${hex[1]}:${hex[2]}${hex[3]}]`;
 ```yaml
 - name: "CFWorkers-NAT64-80"
   type: vless
-  # 需替换为第一步中找到的优选IP
-  server: 141.101.122.83
+  server: 141.101.122.83   # 需替换为第一步中找到的优选IP
   port: 80
   uuid: "1" # 可任意填写
   udp: true
@@ -68,8 +67,7 @@ return `[2a00:1098:2b::${hex[0]}${hex[1]}:${hex[2]}${hex[3]}]`;
   ws-opts:
     path: "/?ed=2560"
     headers:
-      # 需替换为绑定Worker的自定义域名
-      Host: "your-worker-domain.com"
+      Host: "your-worker-domain.com"       # 需替换为绑定Worker的自定义域名
 ```
 
 #### 方案B：使用 443 端口 (HTTPS/TLS)
@@ -77,20 +75,16 @@ return `[2a00:1098:2b::${hex[0]}${hex[1]}:${hex[2]}${hex[3]}]`;
 ```yaml
 - name: "CFWorkers-NAT64-443"
   type: vless
-  # 需替换为第一步中找到的优选IP
-  server: 141.101.122.83
+  server: 141.101.122.83    # 需替换为第一步中找到的优选IP
   port: 443
   uuid: "1" # 可任意填写
   udp: true
   tls: true
   network: ws
-  # 如果你的域名证书有效，可以设为 false
-  skip-cert-verify: true
-  # servername 需与 Host 保持一致
-  servername: "your-worker-domain.com"
+  skip-cert-verify: true   # 如果你的域名证书有效，可以设为 false
+  servername: "your-worker-domain.com"   # servername 需与 Host 保持一致
   ws-opts:
     path: "/?ed=2560"
     headers:
-      # 需替换为绑定Worker的自定义域名
-      Host: "your-worker-domain.com"
+      Host: "your-worker-domain.com"       # 需替换为绑定Worker的自定义域名
 ```
