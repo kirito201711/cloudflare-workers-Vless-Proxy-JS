@@ -82,7 +82,6 @@ return `[2a00:1098:2b::${hex[0]}${hex[1]}:${hex[2]}${hex[3]}]`;
   tls: true
   network: ws
   skip-cert-verify: true   # 如果你的域名证书有效，可以设为 false
-  servername: "your-worker-domain.com"   # servername 需与 Host 保持一致
   ws-opts:
     path: "/?ed=2560"
     headers:
