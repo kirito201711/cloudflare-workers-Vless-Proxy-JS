@@ -17,7 +17,7 @@ return `[2001:67c:2960:6464::${hex[0]}${hex[1]}:${hex[2]}${hex[3]}]`;
 先优选cloudflare ip，找到你最适合的ip，确定地理位置，然后在上表选出离刚才的位置最近的NAT64 Prefix  ，替换第346行
 return `[2001:67c:2960:6464::${hex[0]}${hex[1]}:${hex[2]}${hex[3]}]`;中的2001:67c:2960:6464::
 ### mihomo配置
-
+80端口:
 ```yaml
 name: "CFWorkers"
 type: vless
@@ -26,6 +26,24 @@ port: 80
 uuid: "1"                    # 可任意填写
 udp: true
 tls: false
+network: ws
+skip-cert-verify: true
+ws-opts:
+  path: "/?ed=2560"
+  headers:
+    Host: "xxxxxxxxx.com"    # 需替换为绑定Worker的自定义域名
+
+
+443端口：
+80端口:
+```yaml
+name: "CFWorkers"
+type: vless
+server: 141.101.122.83       # 需替换为实际优选IP
+port: 443
+uuid: "1"                    # 可任意填写
+udp: true
+tls: true
 network: ws
 skip-cert-verify: true
 ws-opts:
