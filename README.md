@@ -1,4 +1,4 @@
-访问使用cloudflare CDN的网站通过 
+访问使用cloudflare CDN的网站通过 第346行
 return `[2001:67c:2960:6464::${hex[0]}${hex[1]}:${hex[2]}${hex[3]}]`;
 
 以下为公共NAT64服务列表：
