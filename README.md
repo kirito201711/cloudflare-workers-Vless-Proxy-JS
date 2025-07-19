@@ -32,10 +32,9 @@ ws-opts:
   path: "/?ed=2560"
   headers:
     Host: "xxxxxxxxx.com"    # 需替换为绑定Worker的自定义域名
-
+```
 
 443端口：
-80端口:
 ```yaml
 name: "CFWorkers"
 type: vless
