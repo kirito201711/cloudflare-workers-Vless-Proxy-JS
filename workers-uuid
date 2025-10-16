@@ -1,0 +1,152 @@
+import { connect } from "cloudflare:sockets";
+let userID = 'a96bcab3-aaba-4a7e-833d-83980adfe291';
+const WS_READY_STATE_OPEN = 1;
+const textDecoder = new TextDecoder();
+export default {
+  async fetch(request) {
+    if (request.headers.get("Upgrade") != "websocket") {
+      const url = new URL(request.url);
+      switch (url.pathname) {
+        case '/':
+          return new Response("Hello! This is My APP! Author is TG@godddddddddddddddddddd.");
+        default:
+          return new Response("Not found.", { status: 404 });
+      }
+    }
+    if (!isValidUUID(userID)) {
+        return new Response('UUID is Error.', { status: 400 });
+    }
+    const { 0: client, 1: server } = new WebSocketPair();
+    server.accept();
+    this.handleWebSocket(server, request, userID).catch(err => {
+      console.error(err);
+      if (server.readyState === WS_READY_STATE_OPEN) {
+        server.close(1011, err.message || "error");
+      }
+    });
+    return new Response(null, { status: 101, webSocket: client });
+  },
+  async handleWebSocket(server, request, userID) {
+    let remoteSocket;
+    const readable = new ReadableStream({
+      start(controller) {
+        const earlyData = request.headers.get("sec-websocket-protocol");
+        if (earlyData) {
+          try {
+            const decoded = atob(earlyData.replace(/-/g, "+").replace(/_/g, "/"));
+            controller.enqueue(Uint8Array.from(decoded, c => c.charCodeAt(0)));
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        server.onmessage = e => controller.enqueue(e.data);
+        server.onclose = () => {
+            try { controller.close(); } catch(e){}
+        };
+        server.onerror = (e) => {
+            console.error(e);
+            controller.error("error");
+        };
+      },
+      cancel: () => {
+        remoteSocket?.close();
+      },
+    });
+    const reader = readable.getReader();
+    const { value: firstChunk, done } = await reader.read();
+    if (done) {
+        server.close(1000, "");
+        return;
+    }
+    const { addr, port, offset, ver } = parseHeader(firstChunk, userID);
+    remoteSocket = connect({ hostname: addr, port });
+    const writer = remoteSocket.writable.getWriter();
+    await writer.write(firstChunk.subarray(offset));
+    writer.releaseLock();
+    reader.releaseLock();
+    const safeSend = (chunk) => {
+        if (server.readyState === WS_READY_STATE_OPEN) {
+            server.send(chunk);
+        }
+    };
+    const safeClose = (code, reason) => {
+        if (server.readyState === WS_READY_STATE_OPEN) {
+            server.close(code, reason);
+        }
+    };
+    const closeAll = () => { 
+        remoteSocket?.close();
+        safeClose(1000, "");
+    };
+    await Promise.all([
+      readable.pipeTo(remoteSocket.writable, { preventClose: true }).catch(()=>{}),
+      remoteSocket.readable.pipeTo(new WritableStream({
+        start: () => safeSend(new Uint8Array([ver, 0])),
+        write: safeSend,
+        close: () => safeClose(1000, ""),
+      })).catch(()=>{})
+    ]).catch(closeAll);
+    closeAll();
+  }
+};
+function parseHeader(buf, expectedUserID) {
+  if (buf.byteLength < 24) {
+    throw new Error("error");
+  }
+  const clientUUID = stringify(buf.subarray(1, 17));
+  if (clientUUID !== expectedUserID) {
+    throw new Error("error");
+  }
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const ver = buf[0];
+  const optLen = buf[17];
+  if (buf[18 + optLen] !== 1) {
+    throw new Error("error");
+  }
+  let off = 19 + optLen;
+  const port = view.getUint16(off);
+  off += 2;
+  const type = buf[off++];
+  let addr;
+  if (type === 1) {
+    addr = `${buf[off]}.${buf[off+1]}.${buf[off+2]}.${buf[off+3]}`;
+    off += 4;
+  } else if (type === 2) {
+    const len = buf[off++];
+    if (buf.byteLength < off + len) {
+        throw new Error("error");
+    }
+    addr = textDecoder.decode(buf.subarray(off, off + len));
+    off += len;
+  } else if (type === 3) {
+    if (buf.byteLength < off + 16) {
+        throw new Error("error");
+    }
+    const b = buf.subarray(off, off + 16);
+    addr = Array.from({length:8}, (_,i) => ((b[i*2]<<8)|b[i*2+1]).toString(16)).join(":")
+      .replace(/(^|:)0+(\w)/g, "$1$2")
+      .replace(/:{3,}/, "::");
+    off += 16;
+  } else {
+    throw new Error("error");
+  }
+  return { addr, port, offset: off, ver };
+}
+function isValidUUID(uuid) {
+	const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+	return uuidRegex.test(uuid);
+}
+const byteToHex = [];
+for (let i = 0; i < 256; ++i) {
+	byteToHex.push((i + 256).toString(16).slice(1));
+}
+function unsafeStringify(arr, offset = 0) {
+	return (byteToHex[arr[offset + 0]] + byteToHex[arr[offset + 1]] + byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" + byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" + byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" + byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" + byteToHex[arr[offset + 10]] + byteToHex[arr[offset + 11]] + byteToHex[arr[offset + 12]] + byteToHex[arr[offset + 13]] + byteToHex[arr[offset + 14]] + byteToHex[arr[offset + 15]]).toLowerCase();
+}
+function stringify(arr, offset = 0) {
+	const uuid = unsafeStringify(arr, offset);
+	if (!isValidUUID(uuid)) {
+		throw new Error("error");
+	}
+	return uuid;
+}
