@@ -4,9 +4,9 @@
 ```yaml
 - name: "CFWorkers-80"
   type: vless
-  server: 141.101.122.83   # 优选IP
+  server: 141.101.122.83                   # 优选IP
   port: 80
-  uuid: 1 # 可任意填写
+  uuid: 1                                  # 如果使用的uuid版，请改为你设置的
   udp: true
   tls: false
   network: ws
@@ -22,9 +22,9 @@
 ```yaml
 - name: "CFWorkers-443"
   type: vless
-  server: 141.101.122.83    # 优选IP
+  server: 141.101.122.83                   # 优选IP
   port: 443
-  uuid: "1" # 可任意填写
+  uuid: "1"                                # 如果使用的uuid版，请改为你设置的
   udp: true
   tls: true
   network: ws
