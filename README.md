@@ -2,6 +2,7 @@
 
 #### Mihomo客户端配置：使用 443 端口 (HTTPS/TLS)
 
+注意如果用v2rayng，请开启本地dns
 ```yaml
 - name: "CFWorkers-443"
   type: vless
