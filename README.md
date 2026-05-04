@@ -1,4 +1,4 @@
-##### 请使用workers最终版.js
+# 请使用workers最终版.js
 
 #### Mihomo客户端配置：使用 443 端口 (HTTPS/TLS)
 
